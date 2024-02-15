@@ -19,7 +19,7 @@ from .types import Profile, Topic
 from .utils import deprecated
 
 log = logging.getLogger(__name__)
-
+import json
 
 def get_target(url, apikey):
     ckan = ckanapi.RemoteCKAN(url, apikey=apikey)
@@ -90,6 +90,9 @@ def replicate_remote_organization(org: dict[str, Any], profile: Profile):
     ckan = get_target(profile.ckan_url, profile.api_key)
     remote_org = None
 
+    if org is None:
+        return None
+
     try:
         remote_org = ckan.action.organization_show(id=org["name"])
     except ckanapi.NotFound:
@@ -124,6 +127,10 @@ def replicate_remote_organization(org: dict[str, Any], profile: Profile):
 
 
 def _create(package: dict[str, Any], profile: Profile):
+
+    if "state" in package and package["state"] == "draft":
+        return
+
     ckan = get_target(profile.ckan_url, profile.api_key)
 
     # Create a new package based on the local instance
@@ -134,13 +141,18 @@ def _create(package: dict[str, Any], profile: Profile):
 
     new_package_data = _prepare(package["id"], new_package_data, profile)
 
+    if 'extras' in new_package_data:
+        extras_list = new_package_data['extras']
+        new_package_data['extras'] = [item for item in extras_list if item.get('key') != 'metadata_language'] 
+     
     with reattaching_context(package["id"], new_package_data, profile, ckan):
         remote_package = ckan.action.package_create(**new_package_data)
-        set_syndicated_id(
-            package["id"],
-            remote_package["id"],
-            profile.field_id,
-        )
+        
+    set_syndicated_id(
+        package["id"],
+        remote_package["id"],
+        profile.field_id,
+    )
 
 
 def _update(package: dict[str, Any], profile: Profile):
@@ -161,8 +173,11 @@ def _update(package: dict[str, Any], profile: Profile):
     # Keep the existing remote ID and Name
     updated_package["id"] = remote_package["id"]
     updated_package["name"] = remote_package["name"]
+    updated_package["owner_org"] = remote_package["owner_org"]
 
-    updated_package = _prepare(package["id"], updated_package, profile)
+    if 'extras' in updated_package:
+        extras_list = updated_package['extras']
+        updated_package['extras'] = [item for item in extras_list if item.get('key') != 'metadata_language']
 
     with reattaching_context(package["id"], updated_package, profile, ckan):
         ckan.action.package_update(**updated_package)
@@ -180,6 +195,7 @@ def _compute_remote_name(package: dict[str, Any], profile: Profile):
 
 
 def _normalize_org_id(package: dict[str, Any], profile: Profile):
+    
     org = package.pop("organization")
     if profile.replicate_organization:
         org_id = replicate_remote_organization(org, profile)
@@ -192,6 +208,8 @@ def _normalize_org_id(package: dict[str, Any], profile: Profile):
 def _prepare(
     local_id: str, package: dict[str, Any], profile: Profile
 ) -> dict[str, Any]:
+
+    
     extras_dict = dict([(o["key"], o["value"]) for o in package["extras"]])
     extras_dict.pop(profile.field_id, None)
     package["extras"] = [
@@ -243,10 +261,11 @@ def set_syndicated_id(local_id: str, remote_id: str, field: str):
         model.Session.add(existing)
         model.Session.commit()
         model.Session.flush()
-    else:
-        model.Session.query(model.PackageExtra).filter_by(id=ext_id).update(
+    else:  
+        model.Session.query(model.PackageExtra).filter(model.PackageExtra.key == ext_id[0]).update(
             {"value": remote_id, "state": "active"}
         )
+        
     rebuild(local_id)
 
 
@@ -257,6 +276,7 @@ def reattaching_context(
     profile: Profile,
     ckan: ckanapi.RemoteCKAN,
 ):
+
     try:
         yield
     except ckanapi.ValidationError as e:
@@ -264,7 +284,7 @@ def reattaching_context(
             raise
     else:
         return
-
+    
     log.warning(
         "There is a package with the same name on remote portal: %s.",
         package["name"],
@@ -275,6 +295,8 @@ def reattaching_context(
             "Profile %s does not have author set. Skip syndication", profile.id
         )
         return
+        
+    
 
     try:
         remote_package = ckan.action.package_show(id=package["name"])
@@ -307,7 +329,7 @@ def reattaching_context(
 
     log.info("Author is the same({0}). Continue syndication".format(author))
 
-    ckan.action.package_update(id=remote_package["id"], **package)
+    ckan.action.package_update(**package)         
     set_syndicated_id(
         local_id,
         remote_package["id"],
