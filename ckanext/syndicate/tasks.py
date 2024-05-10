@@ -143,7 +143,7 @@ def _create(package: dict[str, Any], profile: Profile):
 
     if 'extras' in new_package_data:
         extras_list = new_package_data['extras']
-        new_package_data['extras'] = [item for item in extras_list if item.get('key') != 'metadata_language'] 
+        new_package_data['extras'] = [item for item in extras_list if item.get('key') not in ['metadata_language', 'access_rights', 'linked_dataset', 'status']] 
      
     with reattaching_context(package["id"], new_package_data, profile, ckan):
         remote_package = ckan.action.package_create(**new_package_data)
@@ -161,6 +161,10 @@ def _update(package: dict[str, Any], profile: Profile):
     syndicated_id: Optional[str] = tk.h.get_pkg_dict_extra(
         package, profile.field_id
     )
+    
+    log.info("SyndicateId %s",syndicated_id)
+
+    
     if not syndicated_id:
         return _create(package, profile)
     try:
@@ -177,7 +181,7 @@ def _update(package: dict[str, Any], profile: Profile):
 
     if 'extras' in updated_package:
         extras_list = updated_package['extras']
-        updated_package['extras'] = [item for item in extras_list if item.get('key') != 'metadata_language']
+        updated_package['extras'] = [item for item in extras_list if item.get('key')  not in ['metadata_language', 'access_rights', 'linked_dataset', 'status']]
 
     with reattaching_context(package["id"], updated_package, profile, ckan):
         ckan.action.package_update(**updated_package)
