@@ -48,12 +48,16 @@ def sync_package(package_id: str, action: Topic, profile: Profile):
         params,
     )
 
+    ## Commenting but can be used in future.
+    #set_syndicate_flag(package["id"], profile)
+ 
     _notify_before(package_id, profile, params)
 
     if action is Topic.create:
         _create(package, profile)
     elif action is Topic.update:
         _update(package, profile)
+
 
     _notify_after(package_id, profile, params)
 
@@ -269,9 +273,48 @@ def set_syndicated_id(local_id: str, remote_id: str, field: str):
         model.Session.query(model.PackageExtra).filter(model.PackageExtra.key == ext_id[0]).update(
             {"value": remote_id, "state": "active"}
         )
-        
+                
     rebuild(local_id)
 
+def set_syndicate_flag(local_id: str, profile: Profile):
+    
+    log.info("set_syndicate_flag method called")  
+    
+    params = {
+        "id": local_id,
+        }
+    datasetPackage: dict[str, Any] = tk.get_action("package_show")(
+        {
+            "ignore_auth": True,
+            "use_cache": False,
+            "validate": False,
+        },
+        params,
+    )
+      
+    syndicate_key_present = False  
+      
+    extras = datasetPackage['extras']
+    for extra in extras:
+        if extra['key'] == profile.flag:
+            syndicate_key_present = True
+            log.info('Key "syndicate" is already present in extras.')
+            break
+    
+    log.info("syndicate_key_present : %s",syndicate_key_present)   
+       
+    if not syndicate_key_present:
+        syndicate_key = model.PackageExtra(
+            package_id=local_id,
+            key=profile.flag,
+            value="true",
+        )
+        model.Session.add(syndicate_key)
+        model.Session.commit()
+        model.Session.flush()   
+        
+        
+    rebuild(local_id)
 
 @contextlib.contextmanager
 def reattaching_context(
