@@ -382,3 +382,59 @@ def reattaching_context(
         remote_package["id"],
         profile.field_id,
     )
+
+@contextlib.contextmanager
+def remove_syndicated_dataset(package_id: str, profile: Profile):
+    log.info("removing syndicated package")
+
+    params = {
+        "id": package_id,
+    }
+    datasetPackage: dict[str, Any] = tk.get_action("package_show")(
+        {
+            "ignore_auth": True,
+            "use_cache": False,
+            "validate": False,
+        },
+        params,
+    )
+    
+    syndicated_id_key_present = False  
+    syndicated_id = None  
+      
+    extras = datasetPackage['extras']
+    for extra in extras:
+        if extra['key'] == profile.field_id:
+            syndicated_id = extra['value']
+            syndicated_id_key_present = True
+            break
+    
+    log.info("syndicated_id_key_present : %s",syndicated_id_key_present)   
+       
+    if syndicated_id_key_present:
+        ckan = get_target(profile.ckan_url, profile.api_key)
+        if ckan:
+            
+            ckan.action.dataset_purge(id=syndicated_id)   
+                
+            log.info(f'Removing {profile.field_id} key ')
+            
+            ext_id = (
+                model.Session.query(model.PackageExtra.id)
+                .join(model.Package, model.Package.id == model.PackageExtra.package_id)
+                .filter(
+                    model.Package.id == package_id,
+                    model.PackageExtra.key == profile.field_id,
+                )
+                .first()
+            )
+            
+            if ext_id:
+                model.Session.query(model.PackageExtra).filter(model.PackageExtra.id == ext_id[0]).delete()
+                model.Session.commit()
+                model.Session.flush()
+                rebuild(package_id)
+
+                
+        
+        

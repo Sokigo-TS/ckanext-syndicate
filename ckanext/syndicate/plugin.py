@@ -16,7 +16,6 @@ from .types import Topic
 
 log = logging.getLogger(__name__)
 
-
 def get_syndicate_flag():
     return tk.config.get("ckan.syndicate.flag", "syndicate")
 
@@ -83,6 +82,33 @@ def _syndicate_dataset(package, operation):
                 package.id,
                 profile.id,
             )
+            log.info("checking if %s is present to remove from remote ckan ", profile.field_id)
+            params = {
+                "id": package.id,
+            }
+            datasetPackage: dict[str, Any] = tk.get_action("package_show")(
+                {
+                    "ignore_auth": True,
+                    "use_cache": False,
+                    "validate": False,
+                },
+                params,
+            )
+            
+            syndicated_id_key_present = False  
+            syndicated_id = None  
+              
+            extras = datasetPackage['extras']
+            for extra in extras:
+                if extra['key'] == profile.field_id:
+                    syndicated_id = extra['value']
+                    syndicated_id_key_present = True
+                    break
+                           
+            if syndicated_id_key_present:  
+                log.info("%s is present. Adding to background job to remove from remote ckan ", profile.field_id) 
+                             
+                utils.remove_syndicated_dataset(package.id, profile)
             continue
 
         log.debug("Syndicate <{}> to {}".format(package.id, profile.ckan_url))

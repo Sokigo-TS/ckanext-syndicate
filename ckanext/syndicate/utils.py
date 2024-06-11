@@ -111,3 +111,11 @@ def try_sync(id_):
     if not pkg:
         return
     plugin.notify(pkg, "changed")
+
+def remove_syndicated_dataset(package_id: str, profile: Profile):
+    import ckanext.syndicate.tasks as tasks
+
+    tk.enqueue_job(
+        tasks.remove_syndicated_dataset,
+        [package_id, profile],
+    )
