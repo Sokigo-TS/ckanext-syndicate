@@ -146,10 +146,14 @@ def _create(package: dict[str, Any], profile: Profile):
     new_package_data["name"] = _compute_remote_name(package, profile)
 
     new_package_data = _prepare(package["id"], new_package_data, profile)
+    
+    # This method adds the custom fields added in dataset to package so that custom fields also syndicate.
+    new_package_data = add_extra_fields_in_package(new_package_data) 
 
     if 'extras' in new_package_data:
         extras_list = new_package_data['extras']
-        new_package_data['extras'] = [item for item in extras_list if item.get('key') not in ['metadata_language', 'access_rights', 'linked_dataset', 'status']] 
+        new_package_data['extras'] = [item for item in extras_list if item.get('key') not in ['language','access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
+                                     'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']] 
       
     with reattaching_context(package["id"], new_package_data, profile, ckan):
         remote_package = ckan.action.package_create(**new_package_data)       
@@ -185,10 +189,14 @@ def _update(package: dict[str, Any], profile: Profile):
     updated_package["id"] = remote_package["id"]
     updated_package["name"] = remote_package["name"]
     updated_package["owner_org"] = remote_package["owner_org"]
-
+            
+    # This method adds the custom fields added in dataset to package so that custom fields also syndicate.
+    updated_package = add_extra_fields_in_package(updated_package) 
+     
     if 'extras' in updated_package:
         extras_list = updated_package['extras']
-        updated_package['extras'] = [item for item in extras_list if item.get('key')  not in ['metadata_language', 'access_rights', 'linked_dataset', 'status']]
+        updated_package['extras'] = [item for item in extras_list if item.get('key')  not in ['language', 'access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
+                                    'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']]
 
     if 'resources' in updated_package:
         updated_package["resources"] = []
@@ -295,6 +303,49 @@ def _update(package: dict[str, Any], profile: Profile):
 
     with reattaching_context(package["id"], updated_package, profile, ckan):
         ckan.action.package_update(**updated_package)
+
+def add_extra_fields_in_package(package):
+
+    package = set_extra_fields_value(package, 'access_rights')
+    package = set_extra_fields_value(package, 'source')
+    package = set_extra_fields_value(package, 'status')
+    package = set_extra_fields_value(package, 'frequency')
+    package = set_extra_fields_value(package, 'issued')
+    package = set_extra_fields_value(package, 'modified')
+    package = set_extra_fields_value(package, 'conforms_to')
+    package = set_extra_fields_value(package, 'spatial_uri')
+    package = set_extra_fields_value(package, 'temporal_start')
+    package = set_extra_fields_value(package, 'temporal_end')
+    package = set_extra_fields_value(package, 'spatial_resolution_in_meters')
+    package = set_extra_fields_value(package, 'provenance')
+    package = set_extra_fields_value(package, 'Klassificering')
+    package = set_extra_fields_value(package, 'Utgivare')
+    package = set_extra_fields_value(package, 'publisher_uri')
+    package = set_extra_fields_value(package, 'publisher_url')
+    package = set_extra_fields_value(package, 'publisher_type')
+    package = set_extra_fields_value(package, 'publisher_email')
+    package = set_extra_fields_value(package, 'contact_uri')
+    package = set_extra_fields_value(package, 'contact_name')
+    package = set_extra_fields_value(package, 'contact_email')
+    
+    return package
+    
+
+def set_extra_fields_value(package, field):
+    val = fetch_value_from_extras(package['extras'], field)
+    
+    val = val if val else package[field] if field in package else None
+    
+    if val:
+        package[field] = val
+     
+    return package     
+
+def fetch_value_from_extras(extras_list, key):
+    for item in extras_list:
+        if item.get('key') == key:
+            return item.get('value')
+    return None
 
 def remove_unnecessary_keys_for_resource_syndication(resource):
     for key in ["package_id", "url", "upload"]:
