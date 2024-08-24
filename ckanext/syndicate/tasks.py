@@ -148,12 +148,14 @@ def _create(package: dict[str, Any], profile: Profile):
     new_package_data = _prepare(package["id"], new_package_data, profile)
     
     # This method adds the custom fields added in dataset to package so that custom fields also syndicate.
-    new_package_data = add_extra_fields_in_package(new_package_data) 
+    # new_package_data = add_extra_fields_in_package(new_package_data) 
 
-    if 'extras' in new_package_data:
-        extras_list = new_package_data['extras']
-        new_package_data['extras'] = [item for item in extras_list if item.get('key') not in ['language','access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
-                                     'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']] 
+    new_package_data['extras'] = []
+
+    #if 'extras' in new_package_data:
+    #    extras_list = new_package_data['extras']
+    #    new_package_data['extras'] = [item for item in extras_list if item.get('key') not in ['language','access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
+    #                                 'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']] 
       
     with reattaching_context(package["id"], new_package_data, profile, ckan):
         remote_package = ckan.action.package_create(**new_package_data)       
@@ -189,14 +191,7 @@ def _update(package: dict[str, Any], profile: Profile):
     updated_package["id"] = remote_package["id"]
     updated_package["name"] = remote_package["name"]
     updated_package["owner_org"] = remote_package["owner_org"]
-            
-    # This method adds the custom fields added in dataset to package so that custom fields also syndicate.
-    updated_package = add_extra_fields_in_package(updated_package) 
-     
-    if 'extras' in updated_package:
-        extras_list = updated_package['extras']
-        updated_package['extras'] = [item for item in extras_list if item.get('key')  not in ['language', 'access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
-                                    'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']]
+           
 
     if 'resources' in updated_package:
         updated_package["resources"] = []
@@ -301,6 +296,73 @@ def _update(package: dict[str, Any], profile: Profile):
             for resource in remote_package["resources"]:
                 ckan.action.resource_delete(id=resource["id"])
 
+
+
+    # This method adds the custom fields added in dataset to package so that custom fields also syndicate.
+    #updated_package = add_extra_fields_in_package(updated_package) 
+      
+    extras_to_syndicate = []  
+      
+    updated_package_extras = [] 
+    if 'extras' in datasetPackage:
+        updated_package_extras = datasetPackage['extras']
+    
+    # First step: Process keys from remote_package["extras"]
+
+    if 'extras' in remote_package:        
+        for remote_extra in remote_package["extras"]:
+            remote_key = remote_extra['key']
+            remote_value = remote_extra['value']
+            
+            if remote_key in updated_package_extras:
+                updated_value = next((extra['value'] for extra in updated_package_extras if extra['key'] == remote_key), None)
+                # If key exists, update the value
+                extras_to_syndicate[remote_key]['value'] = updated_value
+            else:
+                # If key doesn't exist, add the new key-value pair
+                extras_to_syndicate.append(remote_extra)
+    
+    # Second step: Process keys from updated_package_extras that are not in remote_package["extras"]
+    if 'extras' in datasetPackage:        
+        remote_keys = {extra['key'] for extra in remote_package["extras"]}  # Get all keys from remote_package
+        
+        for updated_extra in updated_package_extras:
+            updated_key = updated_extra['key']
+            
+            # If the key is not in remote_package, append it to extras_to_syndicate
+            if updated_key not in remote_keys:
+                extras_to_syndicate.append(updated_extra)
+    
+    fields_to_check = [
+                       'language', 'access_rights', 'source', 'status', 'frequency', 'issued',
+                       'modified', 'conforms_to', 'spatial_uri', 'temporal_start', 'temporal_end',
+                       'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare',
+                       'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type',
+                       'contact_uri', 'contact_name', 'contact_email'
+    ]
+
+    # Iterate through the fields and append only if the value is not None or blank
+    for field in fields_to_check:
+        value = get_field_value(datasetPackage, field)
+        if value:  # Check if value is not None or blank
+            if not any(extra['key'] == field for extra in extras_to_syndicate):
+                extras_to_syndicate.append({'key': field, 'value': value})
+    
+
+    for extra in extras_to_syndicate:
+        log.info(f"Key: {extra['key']}, Value: {extra['value']}")    
+    
+    remote_package['extras'] = []    
+    
+    ckan.action.package_update(**remote_package)
+          
+    #if 'extras' in updated_package:
+    #    extras_list = updated_package['extras']
+    #    updated_package['extras'] = [item for item in extras_list if item.get('key')  not in ['language', 'access_rights', 'source', 'status', 'frequency', 'issued', 'modified', 'conforms_to', 'spatial_uri', 
+    #                                'temporal_start', 'temporal_end', 'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare', 'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type', 'contact_uri', 'contact_name', 'contact_email']]
+
+    updated_package['extras'] = extras_to_syndicate
+
     with reattaching_context(package["id"], updated_package, profile, ckan):
         ckan.action.package_update(**updated_package)
 
@@ -330,6 +392,12 @@ def add_extra_fields_in_package(package):
     
     return package
     
+def get_field_value(package, field):
+    val = fetch_value_from_extras(package['extras'], field)
+    
+    val = val if val else package[field] if field in package else None
+    
+    return val     
 
 def set_extra_fields_value(package, field):
     val = fetch_value_from_extras(package['extras'], field)
