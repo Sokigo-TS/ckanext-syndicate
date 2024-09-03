@@ -18,6 +18,8 @@ from . import signals
 from .types import Profile, Topic
 from .utils import deprecated
 
+from ckan.common import config
+
 import os
 
 log = logging.getLogger(__name__)
@@ -183,7 +185,7 @@ def _update(package: dict[str, Any], profile: Profile):
     updated_package["id"] = remote_package["id"]
     updated_package["name"] = remote_package["name"]
     updated_package["owner_org"] = remote_package["owner_org"]
-           
+      
 
     if 'resources' in updated_package:
         updated_package["resources"] = []
@@ -323,6 +325,15 @@ def _update(package: dict[str, Any], profile: Profile):
             # If the key is not in remote_package, append it to extras_to_syndicate
             if updated_key not in remote_keys:
                 extras_to_syndicate.append(updated_extra)
+
+    # Fields that should not be syndicated
+    
+    excluded_fields = config.get('syndicate_excluded_fields')
+
+    if excluded_fields:
+        excluded_keys = [key.lower() for key in excluded_fields.split()]
+    else:
+        excluded_keys = []
     
     custom_metadata_fields = [
                        'language', 'access_rights', 'source', 'status', 'frequency', 'issued',
@@ -332,11 +343,13 @@ def _update(package: dict[str, Any], profile: Profile):
                        'contact_uri', 'contact_name', 'contact_email'
     ]
 
+
     # Set custom added metadata fields in package so that it can be syndicated.
     for field in custom_metadata_fields:
-        value = get_field_value(datasetPackage, field)
-        if value:  # Check if value is not None or blank
-            updated_package[field] = value
+        if field.lower() not in excluded_keys:
+            value = get_field_value(datasetPackage, field)
+            if value:  # Check if value is not None or blank
+                updated_package[field] = value
        
     #Set extra variables
     updated_package['extras'] = extras_to_syndicate
@@ -350,8 +363,7 @@ def _update(package: dict[str, Any], profile: Profile):
     with reattaching_context(package["id"], updated_package, profile, ckan):
         ckan.action.package_update(**updated_package)
 
-
-    
+ 
 def get_field_value(package, field):
     val = fetch_value_from_extras(package['extras'], field)
     
@@ -373,14 +385,14 @@ def remove_unnecessary_keys_for_resource_syndication(resource):
     return resource
 
 def download_and_prepare_resource(local_resource, profile):
-    download_file(local_resource["url"], local_resource["name"])
+    #download_file(local_resource["url"], local_resource["name"])
     
-    ## Uncomment below to check in local 
-    #url = 'http://localhost:5000/dataset/{package_id}/resource/{id}/download/{name}'.format(
-    #    package_id=local_resource["package_id"],
-    #    id=local_resource["id"],
-    #    name=local_resource["name"]
-    #)
+    # Uncomment below to check in local 
+    url = 'http://localhost:5000/dataset/{package_id}/resource/{id}/download/{name}'.format(
+        package_id=local_resource["package_id"],
+        id=local_resource["id"],
+        name=local_resource["name"]
+    )
     download_file(url, local_resource["name"])
     resource_to_upload = remove_unnecessary_keys_for_resource_syndication(local_resource.copy())
     return resource_to_upload        
