@@ -22,6 +22,8 @@ from ckan.common import config
 
 import os
 
+import ast
+
 log = logging.getLogger(__name__)
 import json
 
@@ -42,7 +44,8 @@ def sync_package(package_id: str, action: Topic, profile: Profile):
     # time of task creation).
     params = {
         "id": package_id,
-    }
+    }       
+ 
     package: dict[str, Any] = tk.get_action("package_show")(
         {
             "ignore_auth": True,
@@ -51,18 +54,18 @@ def sync_package(package_id: str, action: Topic, profile: Profile):
         },
         params,
     )
-
+    
     ## Commenting but can be used in future.
     #set_syndicate_flag(package["id"], profile)
- 
+    
     _notify_before(package_id, profile, params)
-
+    
     if action is Topic.create:
         _create(package, profile)
     elif action is Topic.update:
         _update(package, profile)
-
-
+    
+    
     _notify_after(package_id, profile, params)
 
 
@@ -215,7 +218,7 @@ def _update(package: dict[str, Any], profile: Profile):
                     log.info('Id of local and remote resource matched : %s', local_resource["id"])
                     resourceFound = True
                     
-                    if  local_resource["url_type"] == "upload": 
+                    if  local_resource["url_type"] == "upload" or local_resource["datastore_active"] == True: 
                         
                         log.info('Resource type is upload')
                         
@@ -223,26 +226,37 @@ def _update(package: dict[str, Any], profile: Profile):
                             
                             log.info('Local resource file is changed.')   
                             
+                            if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
+                                local_resource["name"] =local_resource["name"] + ".csv"
+                                local_resource["url_type"] ="upload"
+                            
                             resourceToUpload = download_and_prepare_resource(local_resource, profile)
-                           
-                            ckan.action.resource_delete(id=remote_resource["id"])
+                            if resourceToUpload:
                             
-                            resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
-                                                                        url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
-                                                                                ckan_url=profile.ckan_url,
-                                                                                package_id=remote_resource["package_id"],
-                                                                                id=local_resource["id"],
-                                                                                name=local_resource["name"]
-                                                                                ),
-                                                                        upload = open(os.path.abspath(local_resource["name"]), 'rb'),
-                                                                        **resourceToUpload)
-                            
-                           
-                            resourceToUpload["url"] = resourceToSave["url"]
+                                resourceToUpload["datastore_active"] = False
+                        
+                                if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
+                                    resourceToUpload["mimetype"]="text/csv" 
+                                
+                                ckan.action.resource_delete(id=remote_resource["id"])
+                                cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}
 
-                            updated_package["resources"].append(resourceToUpload)
-                            
-                            delete_local_file(local_resource["name"])
+                                resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
+                                                                            url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
+                                                                                    ckan_url=profile.ckan_url,
+                                                                                    package_id=remote_resource["package_id"],
+                                                                                    id=local_resource["id"],
+                                                                                    name=local_resource["name"]
+                                                                                    ),
+                                                                            upload = open(os.path.abspath(local_resource["name"]), 'rb'),
+                                                                            **cleaned_resource_to_upload)
+                                
+                                
+                                resourceToUpload["url"] = resourceToSave["url"]
+                                
+                                updated_package["resources"].append(resourceToUpload)
+                                
+                                delete_local_file(local_resource["name"])
                              
                         else:
                             
@@ -260,27 +274,36 @@ def _update(package: dict[str, Any], profile: Profile):
                         updated_package["resources"].append(local_resource)  
                         
             if resourceFound == False:
-                if local_resource["url_type"] == "upload":
+                if local_resource["url_type"] == "upload" or local_resource["datastore_active"] == True:
+                    
+                    if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
+                        local_resource["name"] =local_resource["name"] + ".csv"
+                        local_resource["url_type"] ="upload"
                     
                     resourceToUpload = download_and_prepare_resource(local_resource, profile)
-    
-                    log.info("upload path %s", os.path.abspath(local_resource["name"]))
-    
-                    resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
-                                                                url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
-                                                                        ckan_url=profile.ckan_url,
-                                                                        package_id=syndicated_id,
-                                                                        id=local_resource["id"],
-                                                                        name=local_resource["name"]
-                                                                        ),
-                                                                upload = open(os.path.abspath(local_resource["name"]), 'rb'),
-                                                                **resourceToUpload)
-                    
-                    resourceToUpload["url"] = resourceToSave["url"]
-    
-                    updated_package["resources"].append(resourceToUpload) 
-                    
-                    delete_local_file(local_resource["name"])
+                    if resourceToUpload:
+                        resourceToUpload["datastore_active"] = False
+                        
+                        if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
+                            resourceToUpload["mimetype"]="text/csv"
+                        
+                        log.info("upload path %s", os.path.abspath(local_resource["name"]))
+                        cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}    
+                        resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
+                                                                    url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
+                                                                            ckan_url=profile.ckan_url,
+                                                                            package_id=syndicated_id,
+                                                                            id=local_resource["id"],
+                                                                            name=local_resource["name"]
+                                                                            ),
+                                                                    upload = open(os.path.abspath(local_resource["name"]), 'rb'),
+                                                                    **cleaned_resource_to_upload)
+                        
+                        resourceToUpload["url"] = resourceToSave["url"]
+                        
+                        updated_package["resources"].append(resourceToUpload) 
+                        
+                        delete_local_file(local_resource["name"])
                     
                 else:
                     updated_package["resources"].append(local_resource) 
@@ -335,24 +358,27 @@ def _update(package: dict[str, Any], profile: Profile):
     else:
         excluded_keys = []
     
-    custom_metadata_fields = [
-                       'language', 'access_rights', 'source', 'status', 'frequency', 'issued',
-                       'modified', 'conforms_to', 'spatial_uri', 'temporal_start', 'temporal_end',
-                       'spatial_resolution_in_meters', 'provenance', 'Klassificering', 'Utgivare',
-                       'publisher_uri', 'publisher_url', 'publisher_email', 'publisher_type',
-                       'contact_uri', 'contact_name', 'contact_email'
-    ]
-
+    custom_metadata_fields = config.get('custom_metadata_fields')
 
     # Set custom added metadata fields in package so that it can be syndicated.
-    for field in custom_metadata_fields:
-        if field.lower() not in excluded_keys:
-            value = get_field_value(datasetPackage, field)
-            if value:  # Check if value is not None or blank
-                updated_package[field] = value
+    if custom_metadata_fields:
+        custom_metadata_fields = [field.strip() for field in custom_metadata_fields.split(',')]
+        for field in custom_metadata_fields:
+            if field.lower() not in excluded_keys:
+                value = get_field_value(datasetPackage, field)
+                if value and value != "[]" and value != "":  # Check if value is not None or blank
+                    if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                        try:
+                            # Safely convert string representation of a list into an actual list
+                            value = ast.literal_eval(value)
+                        except (ValueError, SyntaxError):
+                            log.warning(f'Value for field {field} could not be converted to a list.')
+
+                    log.info(f'field - {field} and value - {value}')
+                    updated_package[field] = value
        
     #Set extra variables
-    updated_package['extras'] = extras_to_syndicate
+    updated_package['extras'] = extras_to_syndicate    
     
     # Remove custom fields from extra as it will throw error i.e. Schema field with the same name already exists.
     if 'extras' in updated_package:
@@ -385,17 +411,22 @@ def remove_unnecessary_keys_for_resource_syndication(resource):
     return resource
 
 def download_and_prepare_resource(local_resource, profile):
-    #download_file(local_resource["url"], local_resource["name"])
+    status_code  = download_file(local_resource["url"], local_resource["name"])
     
-    # Uncomment below to check in local 
-    url = 'http://localhost:5000/dataset/{package_id}/resource/{id}/download/{name}'.format(
-        package_id=local_resource["package_id"],
-        id=local_resource["id"],
-        name=local_resource["name"]
-    )
-    download_file(url, local_resource["name"])
-    resource_to_upload = remove_unnecessary_keys_for_resource_syndication(local_resource.copy())
-    return resource_to_upload        
+    ## Uncomment below to check in local 
+    #url = 'http://localhost:5000/dataset/{package_id}/resource/{id}/download/{name}'.format(
+    #    package_id=local_resource["package_id"],
+    #    id=local_resource["id"],
+    #    name=local_resource["name"]
+    #)
+    #status_code =download_file(url, local_resource["name"])
+    
+    if status_code == 200:
+        resource_to_upload = remove_unnecessary_keys_for_resource_syndication(local_resource.copy())
+        return resource_to_upload    
+    else:
+        log.error("Download failed, skipping resource preparation.")
+        return None  # Return None or handle the error case accordingly
 
 def delete_local_file(file_path):
     try:
@@ -416,6 +447,8 @@ def download_file(url, local_filename):
         log.info("File downloaded successfully: %s", local_filename)
     else:
         log.error("Failed to download file from URL: %s. Status code: %d", url, response.status_code)
+     
+    return response.status_code     
 
 
 def _compute_remote_name(package: dict[str, Any], profile: Profile):
@@ -613,6 +646,7 @@ def reattaching_context(
 
 @contextlib.contextmanager
 def remove_syndicated_dataset(package_id: str, profile: Profile):
+
     log.info("removing syndicated package")
 
     params = {
@@ -664,5 +698,3 @@ def remove_syndicated_dataset(package_id: str, profile: Profile):
                 rebuild(package_id)
 
                 
-        
-        
