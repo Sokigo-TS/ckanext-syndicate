@@ -21,6 +21,7 @@ from .utils import deprecated
 from ckan.common import config
 
 import os
+import pandas as pd
 
 import ast
 
@@ -237,6 +238,7 @@ def _update(package: dict[str, Any], profile: Profile):
                         
                                 if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
                                     resourceToUpload["mimetype"]="text/csv" 
+                                    remove_first_column(os.path.abspath(local_resource["name"]))
                                 
                                 ckan.action.resource_delete(id=remote_resource["id"])
                                 cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}
@@ -286,6 +288,7 @@ def _update(package: dict[str, Any], profile: Profile):
                         
                         if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
                             resourceToUpload["mimetype"]="text/csv"
+                            remove_first_column(os.path.abspath(local_resource["name"]))
                         
                         log.info("upload path %s", os.path.abspath(local_resource["name"]))
                         cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}    
@@ -698,3 +701,21 @@ def remove_syndicated_dataset(package_id: str, profile: Profile):
                 rebuild(package_id)
 
                 
+def remove_first_column(csv_path):
+    """
+    This function removes the first column from a CSV file if it exists
+    and saves the file back to the given path.
+    """
+    try:
+        # Load the CSV
+        df = pd.read_csv(csv_path)
+
+        # Check if the first column is named '_id', if so remove it
+        if df.columns[0] == '_id':
+            df.drop(columns=['_id'], inplace=True)
+
+        # Save the modified dataframe back to the same file
+        df.to_csv(csv_path, index=False)
+    
+    except Exception as e:
+        log.info(f"Error while processing CSV file {csv_path}: {e}")                
