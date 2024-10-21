@@ -181,18 +181,9 @@ def _update(package: dict[str, Any], profile: Profile):
     try:
         remote_package = ckan.action.package_show(id=syndicated_id)
     except ckanapi.NotFound:
-        return _create(package, profile)
-
-    # TODO: maybe we should do deepcopy
-    updated_package = dict(package)
-    # Keep the existing remote ID and Name
-    updated_package["id"] = remote_package["id"]
-    updated_package["name"] = remote_package["name"]
-    updated_package["owner_org"] = remote_package["owner_org"]
-      
-
-    if 'resources' in updated_package:
-        updated_package["resources"] = []
+        return _create(package, profile)    
+    
+    rebuild(package["id"])
     
     log.info('Checking resources')
     
@@ -203,6 +194,17 @@ def _update(package: dict[str, Any], profile: Profile):
                                                                   },
                                                                   { "id": package["id"] }
                                                                   )
+                                                                  
+    # TODO: maybe we should do deepcopy
+    updated_package = dict(datasetPackage)
+    # Keep the existing remote ID and Name
+    updated_package["id"] = remote_package["id"]
+    updated_package["name"] = remote_package["name"]
+    updated_package["owner_org"] = remote_package["owner_org"]
+      
+
+    if 'resources' in updated_package:
+        updated_package["resources"] = []                                                               
 
     if 'resources' in datasetPackage:
         log.info('Resources in local package found')
