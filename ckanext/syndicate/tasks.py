@@ -272,10 +272,19 @@ def _update(package: dict[str, Any], profile: Profile):
                             updated_package["resources"].append(localResourceToUpload)   
 
                     else:
-                        log.info('Resource type is not of upload')
+                        log.info('Resource type is not of upload')                       
                                                 
                         ckan.action.resource_delete(id=remote_resource["id"])
-                        updated_package["resources"].append(local_resource)  
+                        
+                        local_res_to_upload = local_resource.copy() 
+                        
+                        local_res_to_upload["package_id"] = syndicated_id
+                        
+                        cleaned_resource_to_upload = {k: v for k, v in local_res_to_upload.items() if v not in ([])}
+
+                        resourceToSave = ckan.action.resource_create(**cleaned_resource_to_upload)
+                                                
+                        updated_package["resources"].append(resourceToSave)  
                         
             if resourceFound == False:
                 if local_resource["url_type"] == "upload" or local_resource["datastore_active"] == True:
@@ -311,7 +320,15 @@ def _update(package: dict[str, Any], profile: Profile):
                         delete_local_file(local_resource["name"])
                     
                 else:
-                    updated_package["resources"].append(local_resource) 
+                    local_res_to_upload = local_resource.copy() 
+                        
+                    local_res_to_upload["package_id"] = syndicated_id
+                    
+                    cleaned_resource_to_upload = {k: v for k, v in local_res_to_upload.items() if v not in ([])}
+
+                    resourceToSave = ckan.action.resource_create(**cleaned_resource_to_upload)
+                
+                    updated_package["resources"].append(resourceToSave) 
                                                 
     else: 
         if 'resources' in remote_package:
