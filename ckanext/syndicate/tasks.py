@@ -22,6 +22,7 @@ from ckan.common import config
 
 import os
 import pandas as pd
+import csv
 
 import ast
 
@@ -230,21 +231,21 @@ def _update(package: dict[str, Any], profile: Profile):
                             log.info('Local resource file is changed.')   
                             
                             if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
-                                local_resource["name"] =local_resource["name"] + ".csv"
-                                local_resource["url_type"] ="upload"
+                                local_resource["name"] += ".csv" if not name.endswith(".csv") else ""
                             
                             resourceToUpload = download_and_prepare_resource(local_resource, profile)
                             if resourceToUpload:
-                            
-                                resourceToUpload["datastore_active"] = False
-                        
+                                                    
                                 if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
                                     resourceToUpload["mimetype"]="text/csv" 
-                                    remove_first_column(os.path.abspath(local_resource["name"]))
+                                    
+                                remove_first_column_and_add_bom(os.path.abspath(local_resource["name"]))
+                                
                                 
                                 ckan.action.resource_delete(id=remote_resource["id"])
                                 cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}
 
+                      
                                 resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
                                                                             url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
                                                                                     ckan_url=profile.ckan_url,
@@ -255,7 +256,12 @@ def _update(package: dict[str, Any], profile: Profile):
                                                                             upload = open(os.path.abspath(local_resource["name"]), 'rb'),
                                                                             **cleaned_resource_to_upload)
                                 
-                                
+                                if local_resource["datastore_active"] == True:                        
+                                    resourceUploadedToDataStore = push_csv_to_ckan_datastore(os.path.abspath(local_resource["name"]), resourceToUpload["id"], profile.ckan_url, profile.api_key)
+                                    resourceToUpload["datastore_active"]= resourceUploadedToDataStore
+                                    if resourceUploadedToDataStore == False:                                
+                                        resourceToUpload["url_type"] ="upload"
+                                                                
                                 resourceToUpload["url"] = resourceToSave["url"]
                                 
                                 updated_package["resources"].append(resourceToUpload)
@@ -287,22 +293,24 @@ def _update(package: dict[str, Any], profile: Profile):
                         updated_package["resources"].append(resourceToSave)  
                         
             if resourceFound == False:
+                
                 if local_resource["url_type"] == "upload" or local_resource["datastore_active"] == True:
                     
                     if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
-                        local_resource["name"] =local_resource["name"] + ".csv"
-                        local_resource["url_type"] ="upload"
-                    
+                        local_resource["name"] += ".csv" if not local_resource["name"].endswith(".csv") else ""
+                                            
                     resourceToUpload = download_and_prepare_resource(local_resource, profile)
                     if resourceToUpload:
-                        resourceToUpload["datastore_active"] = False
                         
                         if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
                             resourceToUpload["mimetype"]="text/csv"
-                            remove_first_column(os.path.abspath(local_resource["name"]))
+                            
+                        remove_first_column_and_add_bom(os.path.abspath(local_resource["name"]))                        
                         
                         log.info("upload path %s", os.path.abspath(local_resource["name"]))
-                        cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])}    
+
+                        cleaned_resource_to_upload = {k: v for k, v in resourceToUpload.items() if v not in ([])} 
+                        
                         resourceToSave = ckan.action.resource_create(package_id = syndicated_id,
                                                                     url = '{ckan_url}/dataset/{package_id}/resource/{id}/download/{name}'.format(
                                                                             ckan_url=profile.ckan_url,
@@ -314,7 +322,13 @@ def _update(package: dict[str, Any], profile: Profile):
                                                                     **cleaned_resource_to_upload)
                         
                         resourceToUpload["url"] = resourceToSave["url"]
-                        
+                                                
+                        if local_resource["datastore_active"] == True:                        
+                            resourceUploadedToDataStore = push_csv_to_ckan_datastore(os.path.abspath(local_resource["name"]), resourceToUpload["id"], profile.ckan_url, profile.api_key)
+                            resourceToUpload["datastore_active"]= resourceUploadedToDataStore
+                            if resourceUploadedToDataStore == False:                                
+                                resourceToUpload["url_type"] ="upload"
+                                                     
                         updated_package["resources"].append(resourceToUpload) 
                         
                         delete_local_file(local_resource["name"])
@@ -396,7 +410,6 @@ def _update(package: dict[str, Any], profile: Profile):
                         except (ValueError, SyntaxError):
                             log.warning(f'Value for field {field} could not be converted to a list.')
 
-                    log.info(f'field - {field} and value - {value}')
                     updated_package[field] = value
        
     #Set extra variables
@@ -441,6 +454,7 @@ def download_and_prepare_resource(local_resource, profile):
     #    id=local_resource["id"],
     #    name=local_resource["name"]
     #)
+    
     #status_code =download_file(url, local_resource["name"])
     
     if status_code == 200:
@@ -460,7 +474,7 @@ def delete_local_file(file_path):
 def download_file(url, local_filename):
     """Download a file from a URL and save it locally."""
     log.info("Downloading file from URL: %s", url)
-    response = requests.get(url, stream=True)
+    response = requests.get(url, stream=True, verify=False)
     if response.status_code == 200:
         with open(local_filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024):
@@ -738,3 +752,231 @@ def remove_first_column(csv_path):
     
     except Exception as e:
         log.info(f"Error while processing CSV file {csv_path}: {e}")                
+        
+
+def determine_field_type(value):
+    """Determine the type of a value (text, numeric, etc.)."""
+    try:
+        float(value)
+        return 'numeric'
+    except ValueError:
+        return 'text'
+
+
+def remove_first_column_and_add_bom(csv_path):
+
+    remove_first_column(csv_path) 
+
+    # Check if BOM is present
+    if not has_bom(csv_path):
+        log.info("BOM not present. Writing the file with BOM...")
+        write_csv_with_bom(csv_path)
+        log.info(f"CSV file saved with BOM at {csv_path}.")
+
+def check_datastore_exists(resource_id, ckan_instance_url, ckan_api_key):
+    """
+    Check if a datastore table already exists for the given resource_id.
+    If it exists, this function returns True. Otherwise, it returns False.
+    """
+    datastore_search_url = f"{ckan_instance_url}/api/3/action/datastore_search"
+    params = {
+        'resource_id': resource_id,
+        'limit': 1  # Just check if there's any data in the datastore.
+    }
+    headers = {'Authorization': ckan_api_key}
+
+    try:
+        response = requests.get(datastore_search_url, params=params, headers=headers)
+        response_json = response.json()
+
+        if response_json.get('success'):
+            # If the datastore already contains data, it exists
+            return True
+        else:
+            return False
+    except Exception as e:
+        log.info(f"Error checking datastore existence: {e}")
+        return False
+
+def create_datastore(resource_id, fields, ckan_instance_url, ckan_api_key, primary_key):
+    """
+    Create a datastore for the given resource_id with the specified fields.
+    """
+    datastore_create_url = f'{ckan_instance_url}/api/3/action/datastore_create'
+    headers = {'Authorization': ckan_api_key, 'Content-Type': 'application/json'}
+
+    # Remove '_id' field from the field list if it's included
+    clean_fields = [field for field in fields if field['id'] != '_id']
+
+    payload_create = {
+        'resource_id': resource_id,
+        'fields': clean_fields,  # Field definitions (columns)
+        'force': True,  # Force creation even if the resource exists
+        #'primary_key': primary_key
+    }
+
+    try:
+        response = requests.post(datastore_create_url, json=payload_create, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            log.info(f"Datastore successfully created with fields: {fields}")
+            return True
+        else:
+            log.info(f"Failed to create datastore. Response: {result}")
+            return False
+    except Exception as e:
+        log.info(f"Error creating datastore: {e}")
+        return False
+        
+def delete_datastore(resource_id, ckan_instance_url, ckan_api_key):
+    """
+    Create a datastore for the given resource_id with the specified fields.
+    """
+    datastore_delete_url = f'{ckan_instance_url}/api/3/action/datastore_delete'
+    headers = {'Authorization': ckan_api_key, 'Content-Type': 'application/json'}
+
+    payload_delete = {
+        'resource_id': resource_id,      
+        'force': True,  # Force creation even if the resource exists    
+    }
+
+    try:
+        response = requests.post(datastore_delete_url, json=payload_delete, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            log.info(f"Datastore successfully deleted for resourceid: {resource_id}")
+            return True
+        else:
+            log.info(f"Failed to deleted datastore. Response: {result}")
+            return False
+    except Exception as e:
+        log.info(f"Error deleting datastore: {e}")
+        return False        
+
+def upsert_records(resource_id, records, ckan_instance_url, ckan_api_key, primary_key):
+    """
+    Insert or update records in the datastore for the given resource_id.
+    """
+    datastore_upsert_url = f'{ckan_instance_url}/api/3/action/datastore_upsert'
+    headers = {'Authorization': ckan_api_key, 'Content-Type': 'application/json'}
+
+    log.info(f"primary-key - {primary_key}")
+
+    payload_upsert = {
+        'resource_id': resource_id,  # The resource ID to push data to
+        'method': 'insert',          # 'upsert' allows you to insert or update data
+        'records': records,           # The actual CSV data as records
+        'force':True,
+      #  'primary_key': primary_key   # only need to be passed when method is upsert
+    }
+
+    try:
+        response = requests.post(datastore_upsert_url, json=payload_upsert, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            log.info(f"Successfully pushed {len(records)} records to the CKAN datastore.")
+            return True   
+        else:
+            log.info(f"Failed to upsert records: {result}")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        # Capture the detailed CKAN error response
+        if e.response is not None:
+            content = e.response.content.decode('utf-8')
+            log.info(f"Error response from CKAN: {content}")
+        else:
+            log.info(f"Error occurred while upserting records: {e}")
+        return False    
+
+def push_csv_to_ckan_datastore(csv_file_path, resource_id, ckan_instance_url, ckan_api_key):
+    """Main function to handle CSV imports to CKAN's datastore."""
+
+    # Read the CSV file
+    with open(csv_file_path, 'r') as csv_file:
+        reader = csv.DictReader(csv_file)
+        headers = reader.fieldnames  # Extract CSV column headers as field names
+
+        if not headers:
+            raise ValueError("CSV file has no headers or data")
+
+        # Sample first row to determine field types
+        sample_row = next(reader)  # Peek at the first row to auto-detect field types
+        fields = [{'id': header, 'type': determine_field_type(sample_row[header])} for header in headers]
+
+        # Re-read the CSV file to collect all records
+        csv_file.seek(0)  # Go back to the beginning of the file
+        reader = csv.DictReader(csv_file)
+
+        # Collect CSV data as records
+        records = [row for row in reader]
+                
+        primary_key = check_for_primary_key(headers)
+
+
+    # Step 1: Check if the datastore already exists for this resource
+    datastore_exists = check_datastore_exists(resource_id, ckan_instance_url, ckan_api_key)
+
+    
+    if not datastore_exists:
+        # Step 2a: If datastore doesn't exist, create it
+        log.info("Datastore does not exist. Creating a new datastore.")
+        created = create_datastore(resource_id, fields, ckan_instance_url, ckan_api_key, primary_key)
+        if not created:
+            log.info("Failed to create datastore. Exiting.")
+            return
+    else:        
+        log.info("Datastore already exists. Proceeding to delete datastore and recreate.")
+        isDatastoreDeleted = delete_datastore(resource_id, ckan_instance_url, ckan_api_key)
+        if isDatastoreDeleted:
+            created = create_datastore(resource_id, fields, ckan_instance_url, ckan_api_key, primary_key)
+            if not created:
+                log.info("Failed to create datastore. Exiting.")
+                return
+
+    # Step 2b: Insert or update records into the datastore
+    isSuccess = upsert_records(resource_id, records, ckan_instance_url, ckan_api_key, primary_key)                     
+    
+    return isSuccess
+        
+        
+def check_for_primary_key(headers):
+    """
+    Dynamic check to determine a suitable primary key column.
+    Returns the primary key if found, otherwise None.
+    """
+    # Check if certain standard primary key fields exist, such as 'id', 'record_id', etc.
+    primary_key_candidates = ['id', 'record_id', 'unique_id', 'Index', 'index']
+
+    # Find if any of the primary key candidates exist in the headers
+    for key in primary_key_candidates:
+        if key in headers:
+            return [key]  # Return as a list since primary_key is always passed as a list
+
+    # If no primary key candidate is found, return None
+    return None        
+    
+# Function to check if a file has a BOM
+def has_bom(csv_file_path):
+    with open(csv_file_path, 'rb') as file:
+        first_bytes = file.read(3)  # Read the first 3 bytes (size of BOM)
+        return first_bytes == b'\xef\xbb\xbf'  # Check for BOM signature
+
+# Function to read data from the non-BOM file and write it back with BOM
+def write_csv_with_bom(csv_file_path):
+    # Read the data from the original file (without BOM)
+    with open(csv_file_path, mode='r', encoding='utf-8', newline='') as file:
+        reader = csv.reader(file)
+        data = list(reader)  # Convert CSV reader object to a list
+
+    # Write the CSV data with BOM
+    with open(csv_file_path, mode='w', encoding='utf-8-sig', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerows(data)
+    
