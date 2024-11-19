@@ -231,7 +231,7 @@ def _update(package: dict[str, Any], profile: Profile):
                             log.info('Local resource file is changed.')   
                             
                             if local_resource["datastore_active"] == True and local_resource["format"] == "CSV":
-                                local_resource["name"] += ".csv" if not name.endswith(".csv") else ""
+                                local_resource["name"] += ".csv" if not local_resource["name"].endswith(".csv") else ""
                             
                             resourceToUpload = download_and_prepare_resource(local_resource, profile)
                             if resourceToUpload:
